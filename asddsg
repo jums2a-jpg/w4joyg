@@ -1,0 +1,143 @@
+local Players = game:GetService("Players")
+ 
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+ 
+ 
+-- =========================================================
+-- CHECK IF PLAYER IS CURRENTLY RIDING
+-- =========================================================
+ 
+local function isRiding()
+	for _, guiObject in pairs(playerGui:GetDescendants()) do
+ 
+		if guiObject:IsA("TextButton") or guiObject:IsA("ImageButton") then
+ 
+			local text = ""
+ 
+			if guiObject:IsA("TextButton") then
+				text = guiObject.Text
+			end
+ 
+			-- Also check TextLabels inside the button
+			for _, child in pairs(guiObject:GetDescendants()) do
+				if child:IsA("TextLabel") then
+					text = text .. " " .. child.Text
+				end
+			end
+ 
+			text = string.upper(text)
+ 
+			-- These controls only appear while riding
+			if string.find(text, "+ GAIT", 1, true)
+				or string.find(text, "- GAIT", 1, true)
+				or string.find(text, "SPRINT", 1, true)
+				or string.find(text, "STOP", 1, true) then
+ 
+				return true
+			end
+		end
+	end
+ 
+	return false
+end
+ 
+ 
+-- =========================================================
+-- YOUR WORKING AUTO DISMOUNT
+-- =========================================================
+ 
+local function autoDismount()
+ 
+	for _, guiObject in pairs(playerGui:GetDescendants()) do
+ 
+		if guiObject:IsA("TextButton") or guiObject:IsA("ImageButton") then
+ 
+			local buttonText = guiObject:IsA("TextButton") and guiObject.Text or ""
+ 
+			local textLabel = guiObject:FindFirstChildOfClass("TextLabel")
+ 
+			if textLabel then
+				buttonText = buttonText .. " " .. textLabel.Text
+			end
+ 
+			if string.find(string.upper(buttonText), "DISMOUNT", 1, true) then
+ 
+				for _, connection in pairs(getconnections(guiObject.MouseButton1Click)) do
+					connection:Fire()
+				end
+ 
+				for _, connection in pairs(getconnections(guiObject.Activated)) do
+					connection:Fire()
+				end
+ 
+				print("Successfully triggered Mount/Dismount button!")
+				return true
+			end
+		end
+	end
+ 
+	warn("Mount/Dismount button not found in PlayerGui.")
+	return false
+end
+ 
+ 
+-- =========================================================
+-- MONITOR RIDING STATE
+-- =========================================================
+ 
+local riding = false
+local ridingStartTime = 0
+local dismounting = false
+ 
+while true do
+ 
+	local currentlyRiding = isRiding()
+ 
+	-- Player has just started riding
+	if currentlyRiding and not riding then
+ 
+		riding = true
+		ridingStartTime = os.clock()
+ 
+		print("Horse detected! Starting 10 second timer...")
+ 
+	end
+ 
+ 
+	-- Player is no longer riding
+	if not currentlyRiding and riding then
+ 
+		riding = false
+		ridingStartTime = 0
+ 
+		print("Player is no longer riding.")
+ 
+	end
+ 
+ 
+	-- Check the 10 second timer
+	if riding and not dismounting then
+ 
+		local elapsed = os.clock() - ridingStartTime
+ 
+		if elapsed >= 10 then
+ 
+			dismounting = true
+ 
+			print("10 seconds passed. Dismounting...")
+ 
+			autoDismount()
+ 
+			-- Give the UI time to update
+			task.wait(0.5)
+ 
+			dismounting = false
+ 
+		end
+	end
+ 
+ 
+	task.wait(0.1)
+ 
+end
