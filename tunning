@@ -1,0 +1,116 @@
+-- Standalone event item trading. All toggles start OFF.
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local playerGui = Players.LocalPlayer:WaitForChild("PlayerGui")
+local GUI_NAME = "WHICorruptedSoulAutoSpend"
+local TRADE_DELAY = 0.5 -- seconds after each server response
+
+if playerGui:FindFirstChild(GUI_NAME) then
+    warn("[Corrupted Soul] UI already running; unload it first.")
+    return
+end
+
+local running, pending = true, false
+local items = {
+    {name = "Corrupted Soul", key = "halloweenPearl", enabled = false},
+    {name = "Crypt Key", key = "halloweenCrypt", enabled = false},
+    {name = "Maple Keys", key = "goldenMapleChest", enabled = false},
+}
+local gui = Instance.new("ScreenGui")
+gui.Name = GUI_NAME
+gui.ResetOnSpawn = false
+gui.Parent = playerGui
+
+local panel = Instance.new("Frame", gui)
+panel.Size = UDim2.fromOffset(290, 250)
+panel.Position = UDim2.new(0.5, -145, 0.3, 0)
+panel.BackgroundColor3 = Color3.fromRGB(30, 33, 40)
+Instance.new("UICorner", panel)
+
+local function label(text, y, height)
+    local object = Instance.new("TextLabel", panel)
+    object.Position = UDim2.fromOffset(10, y)
+    object.Size = UDim2.new(1, -20, 0, height)
+    object.BackgroundTransparency = 1
+    object.TextColor3 = Color3.new(1, 1, 1)
+    object.Font = Enum.Font.SourceSans
+    object.TextSize = 18
+    object.TextWrapped = true
+    object.Text = text
+    return object
+end
+
+label("Event Items Auto Spend", 8, 28)
+local status = label("OFF | Ready", 42, 60)
+local function paint()
+    if not running then return end
+    for _, item in ipairs(items) do
+        item.button.Text = item.name .. ": " .. (item.enabled and "ON" or "OFF")
+        item.button.BackgroundColor3 = item.enabled and Color3.fromRGB(50, 160, 95)
+            or Color3.fromRGB(150, 65, 65)
+    end
+end
+for index, item in ipairs(items) do
+    local button = Instance.new("TextButton", panel)
+    button.Position = UDim2.fromOffset(10, 105 + (index - 1) * 45)
+    button.Size = UDim2.fromOffset(175, 40)
+    button.TextSize = 18
+    button.TextColor3 = Color3.new(1, 1, 1)
+    item.button = button
+    button.Activated:Connect(function()
+        item.enabled = not item.enabled
+        paint()
+        status.Text = pending and "Waiting for the current trade to return..."
+            or "Ready | Selected items will trade in turn"
+    end)
+end
+local close = Instance.new("TextButton", panel)
+close.Position = UDim2.fromOffset(195, 150)
+close.Size = UDim2.fromOffset(85, 40)
+close.Text = "Unload"
+close.TextSize = 18
+close.Activated:Connect(function() gui:Destroy() end)
+gui.Destroying:Connect(function()
+    running = false
+    for _, item in ipairs(items) do item.enabled = false end
+end)
+paint()
+
+task.spawn(function()
+    while running do
+        for _, item in ipairs(items) do
+            if not running then break end
+            if item.enabled then
+                local communication = ReplicatedStorage:FindFirstChild("Communication")
+                local functions = communication and communication:FindFirstChild("Functions")
+                local remote = functions and functions:GetChildren()[14]
+                if not remote or not remote:IsA("RemoteFunction") then
+                    for _, other in ipairs(items) do other.enabled = false end
+                    paint()
+                    status.Text = "Functions child 14 unavailable. Check remote index."
+                    break
+                end
+                pending = true
+                status.Text = "Trading " .. item.name .. "..."
+                -- Only one request at a time. OFF cannot undo an already sent trade.
+                local ok, result = pcall(function()
+                    return remote:InvokeServer("Trade", item.key)
+                end)
+                pending = false
+                if not running then break end
+                if not ok or result == false then
+                    item.enabled = false
+                    paint()
+                    status.Text = item.name .. (ok and ": trade declined; check items."
+                        or ": error; check console.")
+                    if not ok then warn("[Event Auto Spend] " .. tostring(result)) end
+                else
+                    -- Response received does not guarantee a successful redemption.
+                    status.Text = item.name .. ": response received"
+                end
+                task.wait(TRADE_DELAY)
+            end
+        end
+        task.wait(0.15)
+    end
+end)
