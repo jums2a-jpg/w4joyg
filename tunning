@@ -1,9 +1,12 @@
--- Standalone event item trading. All toggles start OFF.
+-- Standalone event item spending and purchasing. All toggles start OFF.
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService = game:GetService("UserInputService")
 local playerGui = Players.LocalPlayer:WaitForChild("PlayerGui")
 local GUI_NAME = "WHICorruptedSoulAutoSpend"
 local TRADE_DELAY = 0.5 -- seconds after each server response
+local PURCHASE_DELAY = 0.5 -- seconds after each purchase request
+local purchaseAmount = 1000 -- switch between 1000 and 100 in the UI
 
 if playerGui:FindFirstChild(GUI_NAME) then
     warn("[Corrupted Soul] UI already running; unload it first.")
@@ -16,14 +19,18 @@ local items = {
     {name = "Crypt Key", key = "halloweenCrypt", enabled = false},
     {name = "Maple Keys", key = "goldenMapleChest", enabled = false},
 }
+local purchases = {
+    {name = "Corrupt Energy", shopIndex = 2, enabled = false},
+    {name = "Crypt Key", shopIndex = 3, enabled = false},
+}
 local gui = Instance.new("ScreenGui")
 gui.Name = GUI_NAME
 gui.ResetOnSpawn = false
 gui.Parent = playerGui
 
 local panel = Instance.new("Frame", gui)
-panel.Size = UDim2.fromOffset(290, 250)
-panel.Position = UDim2.new(0.5, -145, 0.3, 0)
+panel.Size = UDim2.fromOffset(290, 480)
+panel.Position = UDim2.new(0.5, -145, 0.1, 0)
 panel.BackgroundColor3 = Color3.fromRGB(30, 33, 40)
 Instance.new("UICorner", panel)
 
@@ -40,7 +47,77 @@ local function label(text, y, height)
     return object
 end
 
-label("Event Items Auto Spend", 8, 28)
+local title = label("Event Items Auto Spend", 8, 28)
+title.Size = UDim2.new(1, -65, 0, 28)
+title.Active = true
+local uiConnections = {}
+local function track(signal, callback)
+    local connection = signal:Connect(callback)
+    table.insert(uiConnections, connection)
+    return connection
+end
+
+-- Drag only the title bar, or the minimized restore button.
+local function makeDraggable(handle, target)
+    local activeInput, startPoint, startPosition
+    local moved = false
+    handle.Active = true
+    handle.InputBegan:Connect(function(input)
+        if activeInput then return end
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+            or input.UserInputType == Enum.UserInputType.Touch then
+            activeInput = input
+            startPoint = input.Position
+            startPosition = target.Position
+            moved = false
+        end
+    end)
+    track(UserInputService.InputChanged, function(input)
+        if not activeInput then return end
+        local mouseMove = activeInput.UserInputType == Enum.UserInputType.MouseButton1
+            and input.UserInputType == Enum.UserInputType.MouseMovement
+        if not mouseMove and input ~= activeInput then return end
+        local delta = input.Position - startPoint
+        if delta.Magnitude > 5 then moved = true end
+        if moved then
+            target.Position = UDim2.new(startPosition.X.Scale,
+                startPosition.X.Offset + delta.X, startPosition.Y.Scale,
+                startPosition.Y.Offset + delta.Y)
+        end
+    end)
+    track(UserInputService.InputEnded, function(input)
+        if input == activeInput then activeInput = nil end
+    end)
+    return function() return moved end
+end
+makeDraggable(title, panel)
+
+local minimize = Instance.new("TextButton", panel)
+minimize.Position = UDim2.new(1, -44, 0, 7)
+minimize.Size = UDim2.fromOffset(34, 28)
+minimize.Text = "-"
+minimize.TextSize = 22
+local restore = Instance.new("TextButton", gui)
+restore.Size = UDim2.fromOffset(160, 40)
+restore.Position = panel.Position
+restore.Text = "Event Items | OPEN"
+restore.TextSize = 17
+restore.BackgroundColor3 = Color3.fromRGB(30, 33, 40)
+restore.TextColor3 = Color3.new(1, 1, 1)
+restore.Visible = false
+Instance.new("UICorner", restore)
+local restoreWasDragged = makeDraggable(restore, restore)
+minimize.Activated:Connect(function()
+    restore.Position = panel.Position
+    panel.Visible = false
+    restore.Visible = true
+end)
+restore.Activated:Connect(function()
+    if restoreWasDragged() then return end
+    panel.Position = restore.Position
+    restore.Visible = false
+    panel.Visible = true
+end)
 local status = label("OFF | Ready", 42, 60)
 local function paint()
     if not running then return end
@@ -72,7 +149,9 @@ close.TextSize = 18
 close.Activated:Connect(function() gui:Destroy() end)
 gui.Destroying:Connect(function()
     running = false
+    for _, connection in ipairs(uiConnections) do connection:Disconnect() end
     for _, item in ipairs(items) do item.enabled = false end
+    for _, item in ipairs(purchases) do item.enabled = false end
 end)
 paint()
 
@@ -109,6 +188,77 @@ task.spawn(function()
                     status.Text = item.name .. ": response received"
                 end
                 task.wait(TRADE_DELAY)
+            end
+        end
+        task.wait(0.15)
+    end
+end)
+
+
+label("Auto Purchase", 242, 28)
+local purchaseStatus = label("Purchases OFF | Ready", 419, 50)
+local amountSelector = Instance.new("TextButton", panel)
+amountSelector.Position = UDim2.fromOffset(10, 374)
+amountSelector.Size = UDim2.new(1, -20, 0, 35)
+amountSelector.TextSize = 18
+amountSelector.Text = "Purchase amount: 1000 (tap to change)"
+amountSelector.Activated:Connect(function()
+    purchaseAmount = purchaseAmount == 1000 and 100 or 1000
+    amountSelector.Text = "Purchase amount: " .. purchaseAmount .. " (tap to change)"
+    purchaseStatus.Text = "Next purchases use " .. purchaseAmount
+end)
+local function paintPurchases()
+    if not running then return end
+    for _, item in ipairs(purchases) do
+        item.button.Text = item.name .. ": " .. (item.enabled and "ON" or "OFF")
+        item.button.BackgroundColor3 = item.enabled and Color3.fromRGB(50, 160, 95)
+            or Color3.fromRGB(150, 65, 65)
+    end
+end
+for index, item in ipairs(purchases) do
+    local button = Instance.new("TextButton", panel)
+    button.Position = UDim2.fromOffset(10, 280 + (index - 1) * 45)
+    button.Size = UDim2.new(1, -20, 0, 40)
+    button.TextSize = 18
+    button.TextColor3 = Color3.new(1, 1, 1)
+    item.button = button
+    button.Activated:Connect(function()
+        item.enabled = not item.enabled
+        paintPurchases()
+        purchaseStatus.Text = item.name .. (item.enabled and ": purchase ON" or ": purchase OFF")
+    end)
+end
+paintPurchases()
+
+-- Purchases use their own worker so a waiting trade does not block them.
+-- FireServer has no response; "sent" does not confirm the purchase succeeded.
+task.spawn(function()
+    while running do
+        for _, item in ipairs(purchases) do
+            if not running then break end
+            if item.enabled then
+                local communication = ReplicatedStorage:FindFirstChild("Communication")
+                local events = communication and communication:FindFirstChild("Events")
+                local remote = events and events:GetChildren()[18]
+                if not remote or not remote:IsA("RemoteEvent") then
+                    for _, other in ipairs(purchases) do other.enabled = false end
+                    paintPurchases()
+                    purchaseStatus.Text = "Events child 18 unavailable. Check remote index."
+                    break
+                end
+                local ok, err = pcall(function()
+                    remote:FireServer("BuyShopItem", "Halloween Shop", item.shopIndex, purchaseAmount, nil)
+                end)
+                if not running then break end
+                if not ok then
+                    item.enabled = false
+                    paintPurchases()
+                    purchaseStatus.Text = item.name .. ": purchase error; check console."
+                    warn("[Event Auto Purchase] " .. tostring(err))
+                else
+                    purchaseStatus.Text = item.name .. ": purchase request sent"
+                end
+                task.wait(PURCHASE_DELAY)
             end
         end
         task.wait(0.15)
