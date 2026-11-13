@@ -162,11 +162,11 @@ task.spawn(function()
             if item.enabled then
                 local communication = ReplicatedStorage:FindFirstChild("Communication")
                 local functions = communication and communication:FindFirstChild("Functions")
-                local remote = functions and functions:GetChildren()[14]
+                local remote = functions and functions:GetChildren()[32]
                 if not remote or not remote:IsA("RemoteFunction") then
                     for _, other in ipairs(items) do other.enabled = false end
                     paint()
-                    status.Text = "Functions child 14 unavailable. Check remote index."
+                    status.Text = "Functions child 32 unavailable. Check remote index."
                     break
                 end
                 pending = true
